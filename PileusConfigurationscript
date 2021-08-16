@@ -1,0 +1,71 @@
+#!/bin/bash
+
+echo "                           Welcome!                           "
+echo "Lets get started with configuring your GCP account with Pileus"
+
+read -p "Please enter the name of the dataset: " dataset_name
+read -p "Please enter the name of the service account: " service_account_ID
+read -p "Please enter the project ID: " project_ID
+read -p "Please enter the billing account ID(Please use hyphens): " billing_account_id
+
+export dataset_location=Default
+export ch_private_key=ch_key
+
+# Setting the project ID
+gcloud config set project $project_ID
+
+# Creating BigQuery dataset
+bq --location=$location mk -d \
+--dataset \
+$project_ID:$dataset_name
+
+# Creating dataset table
+bq mk \
+--table \
+$project_ID:$dataset_name.gcp_billing_export_v1_$billing_account_id
+
+# Enable recommender api
+gcloud services enable recommender.googleapis.com
+echo "recommender API enabled"
+
+# Creating service account
+gcloud iam service-accounts create $service_account_ID
+
+# List of Roles 
+declare -a List_Of_Roles=("compute.viewer" "monitoring.viewer" "recommender.computeViewer" "storage.objectViewer" "bigquery.jobUser" "recommender.billingAccountCudViewer")
+ 
+# Adding Roles to the Pileus service account
+for role in ${List_Of_Roles[@]}; do
+   gcloud projects add-iam-policy-binding $project_ID \
+    --member="serviceAccount:"$service_account_ID"@"$project_ID".iam.gserviceaccount.com" \
+    --role=roles/$role \
+    --no-user-output-enabled --quiet
+   echo $role" was added successfully to "$service_account_ID
+done
+
+# Adding a var with the service account
+pileus_service_account=$service_account_ID"@"$project_ID".iam.gserviceaccount.com"
+
+# List of Roles FinOps
+declare -a List_Of_FinOps_Roles=("viewer" "recommender.billingAccountCudViewer" "recommender.projectCudViewer")
+ 
+# Adding Roles to the FinOps User - customersuccessgroup@cloudzone.io
+for role in ${List_Of_FinOps_Roles[@]}; do
+   gcloud projects add-iam-policy-binding $project_ID \
+    --member='group:customersuccessgroup@cloudzone.io' \
+    --role=roles/$role \
+    --no-user-output-enabled --quiet
+   echo $role" was added successfully to user customersuccessgroup@cloudzone.io"
+done
+
+# Creating private key for the service account
+gcloud iam service-accounts keys create --iam-account $service_account_ID@$project_ID.iam.gserviceaccount.com ${ch_private_key}.json
+
+# BigQuery Audit
+gcloud logging sinks create $dataset_name bigquery.googleapis.com/projects/$project_ID/datasets/$dataset_name --log-filter='logName="projects/'$project_ID'/logs/cloudaudit.googleapis.com%2Fdata_access"                          resource.type="bigquery_resource"'
+
+# Adding the Pileus service account access to the dataset (share dataset)
+bq add-iam-policy-binding --member=serviceAccount:$pileus_service_account --role=roles/bigquery.dataViewer --project_id=$project_ID $project_ID:$dataset_name.gcp_billing_export_v1_$billing_account_id
+
+# Downloading private key for the service account
+cloudshell download ${ch_private_key}.json
