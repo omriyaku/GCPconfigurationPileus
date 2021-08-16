@@ -6,6 +6,8 @@ echo ""
 echo ""
 echo ""
 echo "                           Welcome!                           "
+echo ""
+echo ""
 echo "Lets get started with configuring your GCP account with Pileus"
 
 read -p "Please enter the name of the dataset: " dataset_name
